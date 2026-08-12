@@ -1,0 +1,18 @@
+[
+    {
+        "from_table": "orders",
+        "from_column": "customer_id",
+        "to_table": "customers",
+        "to_column": "customer_id",
+        "relationship": "ONE-TO-MANY",
+        "confidence": 0.99
+    },
+    {
+        "from_table": "orders",
+        "from_column": "product_id",
+        "to_table": "products",
+        "to_column": "product_id",
+        "relationship": "ONE-TO-MANY",
+        "confidence": 0.99
+    }
+]

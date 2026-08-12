@@ -1,0 +1,100 @@
+{
+    "tables": {
+        "categories": {
+            "columns": [
+                {
+                    "column": "category_id",
+                    "type": "character varying"
+                },
+                {
+                    "column": "category_name",
+                    "type": "character varying"
+                }
+            ],
+            "primary_keys": [
+                "category_id"
+            ],
+            "foreign_keys": []
+        },
+        "customers": {
+            "columns": [
+                {
+                    "column": "customer_id",
+                    "type": "character varying"
+                },
+                {
+                    "column": "customer_name",
+                    "type": "character varying"
+                },
+                {
+                    "column": "city",
+                    "type": "character varying"
+                },
+                {
+                    "column": "email",
+                    "type": "character varying"
+                }
+            ],
+            "primary_keys": [
+                "customer_id"
+            ],
+            "foreign_keys": []
+        },
+        "orders": {
+            "columns": [
+                {
+                    "column": "order_id",
+                    "type": "character varying"
+                },
+                {
+                    "column": "customer_id",
+                    "type": "character varying"
+                },
+                {
+                    "column": "product_id",
+                    "type": "character varying"
+                },
+                {
+                    "column": "quantity",
+                    "type": "integer"
+                },
+                {
+                    "column": "order_amount",
+                    "type": "numeric"
+                },
+                {
+                    "column": "order_date",
+                    "type": "date"
+                }
+            ],
+            "primary_keys": [
+                "order_id"
+            ],
+            "foreign_keys": []
+        },
+        "products": {
+            "columns": [
+                {
+                    "column": "product_id",
+                    "type": "character varying"
+                },
+                {
+                    "column": "product_name",
+                    "type": "character varying"
+                },
+                {
+                    "column": "category",
+                    "type": "character varying"
+                },
+                {
+                    "column": "price",
+                    "type": "numeric"
+                }
+            ],
+            "primary_keys": [
+                "product_id"
+            ],
+            "foreign_keys": []
+        }
+    }
+}
