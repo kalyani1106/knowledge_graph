@@ -10,7 +10,7 @@ HOST = "localhost"
 PORT = 5455
 DATABASE = "knowledge_graph_demo"
 USER = "postgres"
-PASSWORD = "postgres"
+PASSWORD = "*******"
 
 conn = psycopg.connect(
     host=HOST,
