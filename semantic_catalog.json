@@ -1,0 +1,114 @@
+{
+    "tables": [
+        {
+            "table": "categories",
+            "business_concept": "Classification or categorization of products or services.",
+            "description": "Contains information about the different categories of products or services offered by a company.",
+            "columns": [
+                {
+                    "column": "category_id",
+                    "meaning": "Unique identifier for each category."
+                },
+                {
+                    "column": "category_name",
+                    "meaning": "Name of the category."
+                }
+            ]
+        },
+        {
+            "table": "customers",
+            "business_concept": "Information about customers or clients.",
+            "description": "Contains information about individual customers, such as their name, city, and email address.",
+            "columns": [
+                {
+                    "column": "customer_id",
+                    "meaning": "Unique identifier for each customer."
+                },
+                {
+                    "column": "customer_name",
+                    "meaning": "Name of the customer."
+                },
+                {
+                    "column": "city",
+                    "meaning": "City where the customer is located."
+                },
+                {
+                    "column": "email",
+                    "meaning": "Email address of the customer."
+                }
+            ]
+        },
+        {
+            "table": "orders",
+            "business_concept": "Record of transactions or purchases made by customers.",
+            "description": "Contains information about each order, including the products purchased, quantities, and dates.",
+            "columns": [
+                {
+                    "column": "order_id",
+                    "meaning": "Unique identifier for each order."
+                },
+                {
+                    "column": "customer_id",
+                    "meaning": "Foreign key referencing the customer who made the order."
+                },
+                {
+                    "column": "product_id",
+                    "meaning": "Foreign key referencing the product being ordered."
+                },
+                {
+                    "column": "quantity",
+                    "meaning": "Number of units of the product ordered."
+                },
+                {
+                    "column": "order_amount",
+                    "meaning": "Total cost of the order."
+                },
+                {
+                    "column": "order_date",
+                    "meaning": "Date on which the order was made."
+                }
+            ]
+        },
+        {
+            "table": "products",
+            "business_concept": "Information about products or services offered by a company.",
+            "description": "Contains information about each product, including its name, category, and price.",
+            "columns": [
+                {
+                    "column": "product_id",
+                    "meaning": "Unique identifier for each product."
+                },
+                {
+                    "column": "product_name",
+                    "meaning": "Name of the product."
+                },
+                {
+                    "column": "category",
+                    "meaning": "Foreign key referencing the category in which the product belongs."
+                },
+                {
+                    "column": "price",
+                    "meaning": "Price of the product."
+                }
+            ]
+        }
+    ],
+    "relationships": [
+        {
+            "from_table": "orders",
+            "from_column": "customer_id",
+            "to_table": "customers",
+            "to_column": "customer_id",
+            "relationship": "ONE-TO-MANY",
+            "confidence": 0.99
+        },
+        {
+            "from_table": "orders",
+            "from_column": "product_id",
+            "to_table": "products",
+            "to_column": "product_id",
+            "relationship": "ONE-TO-MANY",
+            "confidence": 0.99
+        }
+    ]
+}
