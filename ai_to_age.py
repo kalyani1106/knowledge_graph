@@ -9,7 +9,7 @@ HOST = "localhost"
 PORT = 5455
 DATABASE = "knowledge_graph_demo"
 USER = "postgres"
-PASSWORD = "postgres"
+PASSWORD = "*******"
 
 GRAPH_NAME = "ai_knowledge_graph"
 
