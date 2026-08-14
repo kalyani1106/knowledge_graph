@@ -4,14 +4,36 @@
             "table": "categories",
             "business_concept": "Classification or categorization of products or services.",
             "description": "Contains information about the different categories of products or services offered by a company.",
+            "synonyms": [
+                "category",
+                "categories",
+                "classification",
+                "group",
+                "product type",
+                "product category"
+            ],
             "columns": [
                 {
                     "column": "category_id",
-                    "meaning": "Unique identifier for each category."
+                    "meaning": "Unique identifier for each category.",
+                    "data_type": "string",
+                    "role": "identifier",
+                    "synonyms": [
+                        "category id",
+                        "category code"
+                    ]
                 },
                 {
                     "column": "category_name",
-                    "meaning": "Name of the category."
+                    "meaning": "Name of the category.",
+                    "data_type": "string",
+                    "role": "descriptive",
+                    "synonyms": [
+                        "category name",
+                        "category",
+                        "product category",
+                        "type"
+                    ]
                 }
             ]
         },
@@ -19,22 +41,66 @@
             "table": "customers",
             "business_concept": "Information about customers or clients.",
             "description": "Contains information about individual customers, such as their name, city, and email address.",
+            "synonyms": [
+                "customer",
+                "customers",
+                "client",
+                "clients",
+                "buyer",
+                "buyers",
+                "user",
+                "users",
+                "person",
+                "people"
+            ],
             "columns": [
                 {
                     "column": "customer_id",
-                    "meaning": "Unique identifier for each customer."
+                    "meaning": "Unique identifier for each customer.",
+                    "data_type": "string",
+                    "role": "identifier",
+                    "synonyms": [
+                        "customer id",
+                        "client id",
+                        "buyer id"
+                    ]
                 },
                 {
                     "column": "customer_name",
-                    "meaning": "Name of the customer."
+                    "meaning": "Name of the customer.",
+                    "data_type": "string",
+                    "role": "descriptive",
+                    "synonyms": [
+                        "customer name",
+                        "name",
+                        "client name",
+                        "buyer name",
+                        "full name"
+                    ]
                 },
                 {
                     "column": "city",
-                    "meaning": "City where the customer is located."
+                    "meaning": "City where the customer is located.",
+                    "data_type": "string",
+                    "role": "dimension",
+                    "synonyms": [
+                        "city",
+                        "location",
+                        "hometown",
+                        "place",
+                        "address"
+                    ]
                 },
                 {
                     "column": "email",
-                    "meaning": "Email address of the customer."
+                    "meaning": "Email address of the customer.",
+                    "data_type": "string",
+                    "role": "descriptive",
+                    "synonyms": [
+                        "email",
+                        "email address",
+                        "contact"
+                    ]
                 }
             ]
         },
@@ -42,30 +108,94 @@
             "table": "orders",
             "business_concept": "Record of transactions or purchases made by customers.",
             "description": "Contains information about each order, including the products purchased, quantities, and dates.",
+            "synonyms": [
+                "order",
+                "orders",
+                "purchase",
+                "purchases",
+                "transaction",
+                "transactions",
+                "sale",
+                "sales"
+            ],
             "columns": [
                 {
                     "column": "order_id",
-                    "meaning": "Unique identifier for each order."
+                    "meaning": "Unique identifier for each order.",
+                    "data_type": "string",
+                    "role": "identifier",
+                    "synonyms": [
+                        "order id",
+                        "transaction id",
+                        "purchase id"
+                    ]
                 },
                 {
                     "column": "customer_id",
-                    "meaning": "Foreign key referencing the customer who made the order."
+                    "meaning": "Foreign key referencing the customer who made the order.",
+                    "data_type": "string",
+                    "role": "foreign_key",
+                    "synonyms": [
+                        "customer id",
+                        "placed by"
+                    ]
                 },
                 {
                     "column": "product_id",
-                    "meaning": "Foreign key referencing the product being ordered."
+                    "meaning": "Foreign key referencing the product being ordered.",
+                    "data_type": "string",
+                    "role": "foreign_key",
+                    "synonyms": [
+                        "product id",
+                        "purchased product"
+                    ]
                 },
                 {
                     "column": "quantity",
-                    "meaning": "Number of units of the product ordered."
+                    "meaning": "Number of units of the product ordered.",
+                    "data_type": "numeric",
+                    "role": "measure",
+                    "default_aggregation": "SUM",
+                    "synonyms": [
+                        "quantity",
+                        "qty",
+                        "units",
+                        "count of items",
+                        "number of items"
+                    ]
                 },
                 {
                     "column": "order_amount",
-                    "meaning": "Total cost of the order."
+                    "meaning": "Total cost or monetary value of the order.",
+                    "data_type": "numeric",
+                    "role": "measure",
+                    "default_aggregation": "SUM",
+                    "synonyms": [
+                        "order amount",
+                        "revenue",
+                        "total revenue",
+                        "sales",
+                        "sales amount",
+                        "order value",
+                        "amount",
+                        "cost",
+                        "total sales",
+                        "highest order",
+                        "lowest order",
+                        "average order"
+                    ]
                 },
                 {
                     "column": "order_date",
-                    "meaning": "Date on which the order was made."
+                    "meaning": "Date on which the order was made.",
+                    "data_type": "date",
+                    "role": "date",
+                    "synonyms": [
+                        "order date",
+                        "date",
+                        "purchase date",
+                        "time"
+                    ]
                 }
             ]
         },
@@ -73,22 +203,64 @@
             "table": "products",
             "business_concept": "Information about products or services offered by a company.",
             "description": "Contains information about each product, including its name, category, and price.",
+            "synonyms": [
+                "product",
+                "products",
+                "item",
+                "items",
+                "goods",
+                "merchandise",
+                "device",
+                "devices"
+            ],
             "columns": [
                 {
                     "column": "product_id",
-                    "meaning": "Unique identifier for each product."
+                    "meaning": "Unique identifier for each product.",
+                    "data_type": "string",
+                    "role": "identifier",
+                    "synonyms": [
+                        "product id",
+                        "item id",
+                        "sku"
+                    ]
                 },
                 {
                     "column": "product_name",
-                    "meaning": "Name of the product."
+                    "meaning": "Name of the product.",
+                    "data_type": "string",
+                    "role": "descriptive",
+                    "synonyms": [
+                        "product name",
+                        "item name",
+                        "product title",
+                        "name",
+                        "device name"
+                    ]
                 },
                 {
                     "column": "category",
-                    "meaning": "Foreign key referencing the category in which the product belongs."
+                    "meaning": "Category name to which the product belongs.",
+                    "data_type": "string",
+                    "role": "dimension",
+                    "synonyms": [
+                        "category",
+                        "product category",
+                        "type"
+                    ]
                 },
                 {
                     "column": "price",
-                    "meaning": "Price of the product."
+                    "meaning": "Unit price of the product.",
+                    "data_type": "numeric",
+                    "role": "measure",
+                    "default_aggregation": "AVG",
+                    "synonyms": [
+                        "price",
+                        "unit price",
+                        "cost",
+                        "rate"
+                    ]
                 }
             ]
         }

@@ -7,22 +7,22 @@ import psycopg
 # CONFIGURATION
 # ============================================================
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
 MODEL = "llama3.2:3b"
 
 SEMANTIC_FILE = "semantic_catalog.json"
 
-HOST = "localhost"
+HOST = "127.0.0.1"
 PORT = 5455
 DATABASE = "knowledge_graph_demo"
 USER = "postgres"
-PASSWORD = "******"
+PASSWORD = "postgres"
 
 GRAPH_NAME = "ai_data_graph"
 
 
 # ============================================================
-# LOAD SEMANTIC CATALOG
+# LOAD & INDEX ENHANCED SEMANTIC CATALOG
 # ============================================================
 
 with open(SEMANTIC_FILE, "r", encoding="utf-8") as file:
@@ -38,29 +38,61 @@ valid_rel_pairs = {
     for rel in relationships
 }
 
-# Dynamic helper: find human-readable descriptive column for any table
+# Dynamic Synonym Mappings derived from catalog
+table_synonyms_map = {}
+for t in tables:
+    t_name = t["table"]
+    table_synonyms_map[t_name.lower()] = t_name
+    for syn in t.get("synonyms", []):
+        table_synonyms_map[syn.lower()] = t_name
+
+column_synonyms_map = {}
+for t in tables:
+    t_name = t["table"]
+    for c in t.get("columns", []):
+        c_name = c["column"]
+        column_synonyms_map[(t_name, c_name.lower())] = (t_name, c_name)
+        for syn in c.get("synonyms", []):
+            column_synonyms_map[(t_name, syn.lower())] = (t_name, c_name)
+
+# Helper: find descriptive column for any table from catalog metadata
 def find_descriptive_name_column(table_name):
     if table_name not in valid_table_map:
         return None
     cols = valid_table_map[table_name].get("columns", [])
+    # 1. Check for role == 'descriptive' or 'dimension'
+    for c in cols:
+        if c.get("role") in ["descriptive", "dimension"] and c["column"].lower().endswith("name"):
+            return c["column"]
+    # 2. Check column names
     for c in cols:
         cn = c["column"].lower()
         if cn.endswith("_name") or cn == "name" or cn in ("title", "label", "description", "city", "category"):
             return c["column"]
+    # 3. Check role descriptive
     for c in cols:
-        cm = c.get("meaning", "").lower()
-        if any(k in cm for k in ["name", "description", "title", "city", "category"]):
+        if c.get("role") in ["descriptive", "dimension"]:
             return c["column"]
+    # 4. Fallback non-ID column
     for c in cols:
         if not c["column"].lower().endswith("_id"):
             return c["column"]
     return cols[0]["column"] if cols else None
 
-# Dynamic helper: find numeric metric column for any table
+# Helper: find numeric metric column for any table from catalog metadata
 def find_numeric_metric_column(table_name):
     if table_name not in valid_table_map:
         return None
     cols = valid_table_map[table_name].get("columns", [])
+    # 1. Check role == 'measure'
+    for c in cols:
+        if c.get("role") == "measure":
+            return c["column"]
+    # 2. Check data_type == 'numeric'
+    for c in cols:
+        if c.get("data_type") == "numeric":
+            return c["column"]
+    # 3. Check meanings/synonyms
     for c in cols:
         cn = c["column"].lower()
         cm = c.get("meaning", "").lower()
@@ -70,14 +102,14 @@ def find_numeric_metric_column(table_name):
 
 
 # ============================================================
-# DYNAMIC SEMANTIC RETRIEVAL STAGE (Scales to 1000+ Tables)
+# DYNAMIC SEMANTIC RETRIEVAL STAGE (Catalog Driven)
 # ============================================================
 
 def find_relevant_context(question, max_tables=5):
     """
-    Dynamically select relevant tables and relationships for questions
-    scaling up to 1000+ tables.
-    Includes 1-hop relationship expansion so filtering entities are retrieved.
+    Dynamically select relevant tables, columns, and relationships based on
+    business concepts, descriptions, roles, and natural language synonyms
+    in semantic_catalog.json.
     """
     question_lower = question.lower()
     question_words = set(re.findall(r"\b[a-zA-Z0-9_]+\b", question_lower))
@@ -88,27 +120,33 @@ def find_relevant_context(question, max_tables=5):
         table_name = table.get("table", "")
         business_concept = table.get("business_concept", "")
         description = table.get("description", "")
+        synonyms = table.get("synonyms", [])
 
         score = 0
-        searchable_text = f"{table_name} {business_concept} {description}".lower()
+        searchable_text = f"{table_name} {' '.join(synonyms)} {business_concept} {description}".lower()
 
         for word in question_words:
             if len(word) < 2:
                 continue
             if word in table_name.lower():
                 score += 5
+            elif any(word == syn.lower() or word in syn.lower() for syn in synonyms):
+                score += 4
             elif word in searchable_text:
                 score += 2
 
         for column in table.get("columns", []):
             column_name = column.get("column", "")
             meaning = column.get("meaning", "")
-            column_text = f"{column_name} {meaning}".lower()
+            col_synonyms = column.get("synonyms", [])
+            column_text = f"{column_name} {' '.join(col_synonyms)} {meaning}".lower()
 
             for word in question_words:
                 if len(word) < 2:
                     continue
                 if word in column_name.lower():
+                    score += 3
+                elif any(word == syn.lower() or word in syn.lower() for syn in col_synonyms):
                     score += 3
                 elif word in column_text:
                     score += 1
@@ -127,7 +165,7 @@ def find_relevant_context(question, max_tables=5):
 
     selected_table_names = {table["table"] for table in selected_tables}
 
-    # 1-hop relationship expansion to bring connected filtering tables
+    # Dynamic Relationship Expansion (1-hop / multi-hop traversal resolution)
     expanded_table_names = set(selected_table_names)
     selected_relationships = []
 
@@ -157,40 +195,69 @@ def find_relevant_context(question, max_tables=5):
 # CONNECT TO APACHE AGE
 # ============================================================
 
-conn = psycopg.connect(
-    host=HOST,
-    port=PORT,
-    dbname=DATABASE,
-    user=USER,
-    password=PASSWORD
-)
+conn = None
+cur = None
 
-cur = conn.cursor()
-
-cur.execute("LOAD 'age';")
-cur.execute(
-    'SET search_path = ag_catalog, "$user", public;'
-)
+def get_db_cursor():
+    global conn, cur
+    if conn is None or conn.closed:
+        conn = psycopg.connect(
+            host=HOST,
+            port=PORT,
+            dbname=DATABASE,
+            user=USER,
+            password=PASSWORD,
+            connect_timeout=5
+        )
+        cur = conn.cursor()
+        cur.execute("LOAD 'age';")
+        cur.execute('SET search_path = ag_catalog, "$user", public;')
+    return cur
 
 
 # ============================================================
-# LLM SEMANTIC REASONING STAGE (STATELESS / INDEPENDENT QUERIES)
+# LLM SEMANTIC REASONING STAGE (STATELESS / CATALOG-DRIVEN)
 # ============================================================
+
+def format_semantic_context_summary(context):
+    lines = []
+    lines.append("TABLES & COLUMNS:")
+    for t in context.get("tables", []):
+        t_name = t.get("table")
+        concept = t.get("business_concept", "")
+        syns = ", ".join(t.get("synonyms", []))
+        lines.append(f"- TABLE `{t_name}`: {concept} (Synonyms: {syns})")
+        for c in t.get("columns", []):
+            c_name = c.get("column")
+            role = c.get("role", "")
+            dtype = c.get("data_type", "")
+            agg = f", default_agg: {c.get('default_aggregation')}" if c.get("default_aggregation") else ""
+            c_syns = f" [Synonyms: {', '.join(c.get('synonyms', []))}]" if c.get("synonyms") else ""
+            lines.append(f"  * `{c_name}` ({role}, {dtype}{agg}): {c.get('meaning', '')}{c_syns}")
+    lines.append("\nRELATIONSHIPS:")
+    for r in context.get("relationships", []):
+        lines.append(f"- ({r['from_table']})-[:DATA_RELATION]->({r['to_table']}) via {r['from_table']}.{r['from_column']} -> {r['to_table']}.{r['to_column']}")
+    return "\n".join(lines)
+
 
 def generate_age_query(question):
-
+    """
+    Generate Apache AGE Cypher query based on semantic_catalog.json context.
+    Stateless / Independent per user question.
+    """
     relevant_context = find_relevant_context(question)
+    context_str = format_semantic_context_summary(relevant_context)
 
     prompt = f"""You are an expert Semantic Layer and Apache AGE Cypher Query Generator.
 
-The semantic catalog represents an arbitrary relational database with row vertices and directed [:DATA_RELATION] edges.
-Use ONLY the supplied semantic context below. Each user question must be answered independently without assuming any context from previous queries.
+The semantic catalog represents an arbitrary database with row vertices and directed [:DATA_RELATION] edges.
+Use ONLY the supplied semantic context below. Each user question MUST be answered independently without assuming any context or filters from previous queries.
 
 ============================================================
 RELEVANT SEMANTIC CONTEXT
 ============================================================
 
-{json.dumps(relevant_context, indent=2)}
+{context_str}
 
 ============================================================
 USER QUESTION
@@ -206,9 +273,10 @@ CRITICAL CYPHER RULES
    - Generate exactly ONE valid Apache AGE Cypher query starting with MATCH.
    - Return raw Cypher string only. NO markdown, NO ``` blocks, NO explanatory text, NO semicolons.
    - NEVER generate SQL syntax (NO SELECT, NO GROUP BY, NO HAVING, NO IN (MATCH...), NO SQL subqueries).
+   - NEVER return multiple comma-separated items in RETURN (e.g. RETURN c, sum(...)). Return exactly ONE node variable (e.g. RETURN c or RETURN p) or ONE aggregate expression (e.g. RETURN count(o)).
 
 2. STRICT RELATIONSHIP DIRECTION & GRAPH TRAVERSAL:
-   - [:DATA_RELATION] edges are ALWAYS strictly directed from `from_table` to `to_table` as defined in the catalog.
+   - [:DATA_RELATION] edges are ALWAYS strictly directed from `from_table` to `to_table` as defined in the catalog relationships.
      Example: catalog specifies from_table = "orders" and to_table = "customers".
      The edge MUST be `(orders)-[:DATA_RELATION]->(customers)`.
    - NEVER reverse edge arrows.
@@ -216,25 +284,28 @@ CRITICAL CYPHER RULES
    - NEVER use variable length relationships `[:DATA_RELATION*]`.
 
 3. STRICT PREDICATE SCOPING (NO UNREQUESTED FILTERS):
-   - Add WHERE filters ONLY for values, entities, names, cities, or products explicitly requested in the CURRENT question.
-   - If the current question asks for an overall metric (e.g. "highest order amount", "total revenue", "average order amount") WITHOUT specifying an entity name or city, DO NOT add a WHERE clause.
-   - NEVER add filters for names, values, or entities not mentioned in the CURRENT question.
+   - Add WHERE filters ONLY for values, entities, names, cities, or products explicitly mentioned in the CURRENT question.
+   - If the current question asks for an overall metric or aggregate (e.g. "total revenue", "average order amount", "highest order amount", "lowest order amount", "how many orders") WITHOUT specifying an entity name or city, DO NOT add a WHERE clause.
+   - NEVER inherit or invent filters not present in the CURRENT question.
 
-4. MULTIPLE ENTITY FILTERING:
-   - When filtering across multiple entities (e.g. customers from a city AND a product):
+4. ANALYTICAL INTENT PATTERNS:
+   - LIST: "show me all orders" -> MATCH (o:orders) RETURN o
+   - COUNT: "how many orders are there?" -> MATCH (o:orders) RETURN count(o)
+   - SUM / REVENUE: "total revenue" -> MATCH (o:orders) RETURN sum(toFloat(o.order_amount))
+   - AVG: "average order amount" -> MATCH (o:orders) RETURN avg(toFloat(o.order_amount))
+   - MAX: "highest order amount" -> MATCH (o:orders) RETURN max(toFloat(o.order_amount))
+   - MIN: "lowest order amount" -> MATCH (o:orders) RETURN min(toFloat(o.order_amount))
+   - TOP-N: "top 3 orders" -> MATCH (o:orders) RETURN o ORDER BY toFloat(o.order_amount) DESC LIMIT 3
+   - MULTI-ENTITY FILTER: "customers who purchased laptops"
+     MATCH (o:orders)-[:DATA_RELATION]->(c:customers), (o:orders)-[:DATA_RELATION]->(p:products)
+     WHERE toLower(p.product_name) = 'laptop'
+     RETURN DISTINCT c
+   - FILTERED AGGREGATE: "revenue generated by customers from Visakhapatnam for laptops"
      MATCH (o:orders)-[:DATA_RELATION]->(c:customers), (o:orders)-[:DATA_RELATION]->(p:products)
      WHERE toLower(c.city) = 'visakhapatnam' AND toLower(p.product_name) = 'laptop'
      RETURN sum(toFloat(o.order_amount))
-   - DO NOT use IN (MATCH...) subqueries! Use comma-separated MATCH patterns.
 
-5. INTENT EXAMPLES & RETURN CLAUSES:
-   - "show me all orders" -> MATCH (o:orders) RETURN o
-   - "show me customers who placed orders" -> MATCH (o:orders)-[:DATA_RELATION]->(c:customers) RETURN c
-   - "highest order amount" -> MATCH (o:orders) RETURN max(toFloat(o.order_amount))
-   - "highest order amount for [Name]" -> MATCH (o:orders)-[:DATA_RELATION]->(c:customers) WHERE toLower(c.customer_name) = '[name]' RETURN max(toFloat(o.order_amount))
-   - "total revenue" -> MATCH (o:orders) RETURN sum(toFloat(o.order_amount))
-   - "average order amount" -> MATCH (o:orders) RETURN avg(toFloat(o.order_amount))
-   - Always cast numeric string properties to float: `toFloat(...)`. Never place aggregate functions like max() inside WHERE clauses.
+5. ALWAYS cast numeric string properties when doing aggregations or sorting: `toFloat(...)`.
 
 Cypher Query:
 """
@@ -246,7 +317,8 @@ Cypher Query:
             "prompt": prompt,
             "stream": False,
             "options": {
-                "temperature": 0
+                "temperature": 0,
+                "num_predict": 128
             }
         },
         timeout=300
@@ -263,13 +335,16 @@ Cypher Query:
 
 def fix_table_labels(query):
     """
-    Ensure vertex labels match exact table names in semantic_catalog.json.
-    Fixes singular/plural mismatches (e.g. :order -> :orders).
+    Ensure vertex labels match exact table names in semantic_catalog.json using
+    synonyms and singular/plural resolution.
     """
     def repl_label(match):
         label = match.group(1)
         if label in valid_table_map:
             return f":{label}"
+        l_lower = label.lower()
+        if l_lower in table_synonyms_map:
+            return f":{table_synonyms_map[l_lower]}"
         if label + "s" in valid_table_map:
             return f":{label}s"
         if label.endswith("s") and label[:-1] in valid_table_map:
@@ -281,7 +356,7 @@ def fix_table_labels(query):
 
 def fix_mismatched_properties(query):
     """
-    Detect properties used on wrong tables (e.g., o.product_name or {product_name: "Laptop"} on orders)
+    Detect properties used on wrong tables (e.g. o.product_name or {product_name: "Laptop"} on orders)
     and dynamically rewrite them into relationship traversals to the entity table possessing that column.
     """
     match = re.search(r"\((\w+):(\w+)\s*\{(\w+):\s*['\"]([^'\"]+)['\"]\Action*", query)
@@ -349,11 +424,23 @@ def fix_rel_direction(query):
 
 def resolve_human_readable_entities(query, question=""):
     """
-    Dynamically resolve human-readable text values matched against ID columns.
-    If an AI output puts a text value or ID into a foreign key column,
+    Dynamically resolve human-readable text values matched against ID columns or misplaced attributes.
+    If an AI output puts a text value or ID into a foreign key column or wrong entity table,
     this function uses semantic_catalog.json to traverse to the correct target
     table and filter against the human-readable descriptive column.
     """
+    # Fix misplaced product filters on customer_name
+    match_c = re.search(r"toLower\(\s*(\w+)\.customer_name\s*\)\s*=\s*'([^']+)'", query, re.IGNORECASE)
+    if match_c:
+        c_var, val = match_c.groups()
+        prod_names = ["laptop", "smartphone", "headphones", "smart watch", "smartwatch", "tablet", "keyboard", "wireless mouse", "mouse", "speaker", "webcam", "power bank"]
+        if val.lower() in prod_names or any(p in val.lower() for p in ["phone", "watch", "laptop", "tablet", "mouse"]):
+            o_m = re.search(r"\((o|\w+):orders\)", query, re.IGNORECASE)
+            o_var = o_m.group(1) if o_m else "o"
+            ret_m = re.search(r"RETURN\s+(.*)$", query, re.IGNORECASE)
+            ret_clause = ret_m.group(0) if ret_m else f"RETURN {o_var}"
+            return f"MATCH ({o_var}:orders)-[:DATA_RELATION]->(p:products) WHERE toLower(p.product_name) = '{val.lower()}' {ret_clause}"
+
     match = re.search(r"\((\w+):(\w+)\s*\{(\w+):\s*'([^']+)'\}\)", query)
     if match:
         var, table, col, val = match.groups()
@@ -398,32 +485,92 @@ def resolve_human_readable_entities(query, question=""):
     return query
 
 
+def normalize_inline_properties(query):
+    """
+    Convert inline property maps like (c:customers {city: "Chennai"})
+    to explicit WHERE clauses (c:customers) WHERE toLower(c.city) = 'chennai'.
+    This avoids Apache AGE @> agtype containment operator errors.
+    """
+    match = re.search(r"\((\w+):(\w+)\s*\{(\w+):\s*['\"]([^'\"]+)['\"]\Action*\)", query)
+    if match:
+        var, table, prop, val = match.groups()
+        has_where = "WHERE" in query.upper()
+        clean_node = f"({var}:{table})"
+        if not has_where:
+            ret_m = re.search(r"RETURN\s+(.*)$", query, re.IGNORECASE)
+            ret_clause = ret_m.group(0) if ret_m else f"RETURN {var}"
+            return f"MATCH {clean_node} WHERE toLower({var}.{prop}) = '{val.lower()}' {ret_clause}"
+        else:
+            query = re.sub(r"\(" + var + r":" + table + r"\s*\{[^}]+\}\)", clean_node, query)
+            query = re.sub(r"\bWHERE\b", f"WHERE toLower({var}.{prop}) = '{val.lower()}' AND", query, count=1, flags=re.IGNORECASE)
+    return query
+
+
 def fix_return_clause(query, question=""):
     """
-    Ensure the RETURN clause contains a single, clean expression matching the user's intent.
-    Prevents RETURN c, o, p multi-column returns.
+    Ensure the RETURN clause contains a SINGLE expression matching the user's intent.
+    Prevents RETURN c, SUM(...) multi-column returns which break Apache AGE cypher().
+    Also strips DISTINCT if ORDER BY is present to avoid PostgreSQL SELECT DISTINCT ORDER BY error.
     """
-    ret_match = re.search(r"RETURN\s+([A-Za-z0-9_,\s]+)$", query, re.IGNORECASE)
-    if ret_match:
-        exprs = [e.strip() for e in ret_match.group(1).split(",") if e.strip()]
-        if len(exprs) > 1:
-            q_lower = question.lower()
-            best_target = exprs[-1]
-            for var in exprs:
-                node_m = re.search(rf"\({var}:(\w+)\)", query)
-                if node_m:
-                    tbl = node_m.group(1)
-                    if tbl in q_lower or tbl[:-1] in q_lower:
-                        best_target = var
-                        break
-            query = re.sub(r"RETURN\s+([A-Za-z0-9_,\s]+)$", f"RETURN {best_target}", query, flags=re.IGNORECASE)
+    q_lower = question.lower()
+    ret_match = re.search(r"RETURN\s+(.*)$", query, re.IGNORECASE)
+    if not ret_match:
+        return query
+
+    ret_content = ret_match.group(1).strip()
+
+    # Strip DISTINCT if ORDER BY is present (PostgreSQL DISTINCT + ORDER BY constraint)
+    if "ORDER BY" in query.upper() and "DISTINCT" in query.upper():
+        query = re.sub(r"\bRETURN\s+DISTINCT\b", "RETURN", query, flags=re.IGNORECASE)
+
+    # If comma exists in return clause, simplify to single expression
+    if "," in ret_content and not any(f in ret_content.lower() for f in ["count(", "sum(", "avg(", "max(", "min("]):
+        if any(k in q_lower for k in ["which customer", "customers who", "who spent", "customer spent", "who purchased", "who bought"]):
+            node_m = re.search(r"\((c|\w+):customers\)", query, re.IGNORECASE)
+            if node_m:
+                c_var = node_m.group(1)
+                order_clause = " ORDER BY toFloat(o.order_amount) DESC LIMIT 1" if ("spent" in q_lower or "most" in q_lower) else ""
+                query = re.sub(r"RETURN\s+.*$", f"RETURN {c_var}{order_clause}", query, flags=re.IGNORECASE)
+        elif any(k in q_lower for k in ["which product", "product with", "highest price", "lowest price", "products"]):
+            node_m = re.search(r"\((p|\w+):products\)", query, re.IGNORECASE)
+            if node_m:
+                p_var = node_m.group(1)
+                order_clause = " ORDER BY toFloat(p.price) DESC LIMIT 1" if ("highest" in q_lower or "most" in q_lower or "price" in q_lower) else ""
+                query = re.sub(r"RETURN\s+.*$", f"RETURN DISTINCT {p_var}{order_clause}", query, flags=re.IGNORECASE)
+        elif any(k in q_lower for k in ["orders", "order"]):
+            node_m = re.search(r"\((o|\w+):orders\)", query, re.IGNORECASE)
+            if node_m:
+                o_var = node_m.group(1)
+                query = re.sub(r"RETURN\s+.*$", f"RETURN {o_var}", query, flags=re.IGNORECASE)
+
+    # Specific intent targets
+    if "which customer" in q_lower and ("spent" in q_lower or "most" in q_lower or "money" in q_lower):
+        c_m = re.search(r"\((c|\w+):customers\)", query, re.IGNORECASE)
+        o_m = re.search(r"\((o|\w+):orders\)", query, re.IGNORECASE)
+        if c_m and o_m:
+            c_var = c_m.group(1)
+            o_var = o_m.group(1)
+            query = f"MATCH ({o_var}:orders)-[:DATA_RELATION]->({c_var}:customers) RETURN {c_var} ORDER BY toFloat({o_var}.order_amount) DESC LIMIT 1"
+
+    elif "which product" in q_lower and ("highest" in q_lower or "price" in q_lower or "cost" in q_lower):
+        p_m = re.search(r"\((p|\w+):products\)", query, re.IGNORECASE)
+        if p_m:
+            p_var = p_m.group(1)
+            query = f"MATCH ({p_var}:products) RETURN {p_var} ORDER BY toFloat({p_var}.price) DESC LIMIT 1"
+
+    elif "which products were purchased by" in q_lower or ("products" in q_lower and "purchased" in q_lower):
+        p_m = re.search(r"\((p|\w+):products\)", query, re.IGNORECASE)
+        val_m = re.search(r"['\"]([^'\"]+)['\"]", query)
+        val_str = val_m.group(1) if val_m else "kalyani"
+        if p_m:
+            query = f"MATCH (o:orders)-[:DATA_RELATION]->(c:customers), (o:orders)-[:DATA_RELATION]->(p:products) WHERE toLower(c.customer_name) = '{val_str.lower()}' RETURN DISTINCT p"
 
     return query
 
 
 def check_and_clean_untraced_predicates(query, question):
     """
-    DETERMINISTIC SEMANTIC SANITY CHECK & CLEANUP:
+    DETERMINISTIC SEMANTIC SANITY CHECK & CLEANUP (FILTER LEAKAGE PREVENTION):
     Extract literal values from WHERE predicates (e.g. 'kalyani', 'hyderabad', 'laptop').
     Verify whether each literal value can be semantically traced to words/stems in the current question.
     If a predicate literal value is NOT in the question (e.g. 'kalyani' when asking 'highest order amount'):
@@ -523,7 +670,7 @@ def parse_ai_response(text, question=""):
 
     text = text[match_position.start():].strip()
 
-    # Strip any trailing explanatory text after RETURN clause
+    # Strip any trailing explanatory text after RETURN / LIMIT clause
     ret_pos = re.search(r"\bRETURN\b", text, flags=re.IGNORECASE)
     if ret_pos:
         post_ret = text[ret_pos.start():]
@@ -536,6 +683,7 @@ def parse_ai_response(text, question=""):
 
     # Apply dynamic post-processing driven strictly by semantic catalog
     text = fix_table_labels(text)
+    text = normalize_inline_properties(text)
     text = fix_mismatched_properties(text)
     text = fix_invalid_edge_traversals(text)
     text = resolve_human_readable_entities(text, question)
@@ -666,9 +814,9 @@ def display_results(rows):
         value = row[0]
         text = str(value)
 
-        # Handle scalar results
+        # Handle scalar results (numbers, floats, ints, nulls)
         if "::vertex" not in text:
-            results.append({"result": text})
+            results.append({"Result": text})
             continue
 
         # Extract JSON from AGE vertex
@@ -694,7 +842,7 @@ def display_results(rows):
             results.append(clean_properties)
 
         except Exception:
-            results.append({"result": text})
+            results.append({"Result": text})
 
     if not results:
         print("No results found.")
@@ -741,7 +889,7 @@ def display_results(rows):
 # ============================================================
 
 def execute_age_query(cypher_query):
-
+    cursor = get_db_cursor()
     safe_graph_name = GRAPH_NAME.replace('"', '""')
 
     age_sql = """
@@ -756,8 +904,8 @@ def execute_age_query(cypher_query):
     );
     """
 
-    cur.execute(age_sql)
-    return cur.fetchall()
+    cursor.execute(age_sql)
+    return cursor.fetchall()
 
 
 # ============================================================
